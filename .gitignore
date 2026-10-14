@@ -1,0 +1,8 @@
+node_modules/
+dist/
+coverage/
+*.log
+.DS_Store
+.idea/
+# Los archivos .env SÍ se suben a propósito (proyecto universitario)
+*.tsbuildinfo
