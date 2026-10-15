@@ -18,7 +18,7 @@ export class AppService {
     return 'API de Firma Digital UPDS funcionando';
   }
 
-  // 1. REGISTRO EN SUPABASE AUTH
+  // 1. REGISTRO EN SUPABASE AUTH Y CREACIÓN DE PERFIL INICIAL
   async registerUser(email: string, password: string, nombre: string, ci: string) {
     const supabase = this.supabaseService.client;
     const { data, error } = await supabase.auth.signUp({
@@ -28,6 +28,16 @@ export class AppService {
     });
 
     if (error) throw new BadRequestException('Error al registrar usuario: ' + error.message);
+
+    if (data.user) {
+      // Garantizar que la fila exista en public.perfiles
+      await supabase.from('perfiles').upsert({
+        id: data.user.id,
+        nombre: nombre || email,
+        ci: ci || '',
+        updated_at: new Date(),
+      });
+    }
 
     return {
       message: 'Usuario registrado exitosamente',
@@ -48,7 +58,7 @@ export class AppService {
       .from('perfiles')
       .select('*')
       .eq('id', data.user.id)
-      .single();
+      .maybeSingle();
 
     return {
       message: 'Inicio de sesión exitoso',
@@ -65,7 +75,7 @@ export class AppService {
       .from('perfiles')
       .select('*')
       .eq('id', userId)
-      .single();
+      .maybeSingle();
 
     const nombre = perfil?.nombre || 'Estudiante UPDS';
     const email = perfil?.email || 'estudiante@upds.edu.bo';
@@ -86,16 +96,21 @@ export class AppService {
     // Generar el Certificado X.509 autofirmado en formato PEM para Adobe Reader DC
     const certPem = this.generateX509CertificatePem(privateKey, { nombre, email });
 
+    // USAR UPSERT: si la fila no existe la inserta; si ya existe la actualiza
     const { error } = await supabase
       .from('perfiles')
-      .update({
+      .upsert({
+        id: userId,
+        nombre: nombre,
         llave_publica: publicKey,
         certificado_pem: certPem,
-        updated_at: new Date()
-      })
-      .eq('id', userId);
+        updated_at: new Date(),
+      });
 
-    if (error) throw new BadRequestException('Error al guardar en Supabase: ' + error.message);
+    if (error) {
+      console.error('Error detallado de Supabase en generateKeyPair:', error);
+      throw new BadRequestException('Error al guardar en Supabase: ' + error.message);
+    }
 
     return {
       message: 'Par de llaves y Certificado X.509 generados exitosamente',
@@ -194,7 +209,7 @@ export class AppService {
       .from('perfiles')
       .select('*')
       .eq('id', userId)
-      .single();
+      .maybeSingle();
 
     if (userError || !perfil) {
       throw new NotFoundException('Usuario no encontrado en la base de datos');
@@ -295,7 +310,7 @@ export class AppService {
     pdflibAddPlaceholder({
       pdfDoc,
       reason: 'Firma Digital e Integridad UPDS',
-      contactInfo: perfil.email,
+      contactInfo: perfil.email || '',
       name: perfil.nombre,
       location: 'La Paz, Bolivia',
       signatureLength: 16384,
@@ -309,7 +324,7 @@ export class AppService {
     try {
       const p12Buffer = this.createP12Certificate(privateKeyPem, {
         nombre: perfil.nombre,
-        email: perfil.email,
+        email: perfil.email || '',
         ci: perfil.ci,
       });
 
@@ -373,7 +388,7 @@ export class AppService {
         .from('perfiles')
         .select('*')
         .eq('id', firmanteId)
-        .single();
+        .maybeSingle();
 
       if (error || !perfil || !perfil.llave_publica) {
         return {
@@ -399,7 +414,7 @@ export class AppService {
         firmante: {
           nombre: perfil.nombre,
           ci: perfil.ci,
-          email: perfil.email,
+          email: perfil.email || '',
         },
         fechaFirma: fecha,
         hashSha256: hashOriginal,
