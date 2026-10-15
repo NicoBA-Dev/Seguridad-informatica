@@ -1,13 +1,26 @@
 import React, { useEffect, useRef } from 'react';
 import * as THREE from 'three';
+import { VerifyView } from './VerifyView';
 
 interface HeroLandingProps {
     onStart: () => void;
-    onVerify: () => void;
+    onVerify?: () => void;
+    onError?: (mensaje: string) => void;
 }
 
-export const HeroLanding: React.FC<HeroLandingProps> = ({ onStart, onVerify }) => {
+export const HeroLanding: React.FC<HeroLandingProps> = ({
+    onStart,
+    onError = () => { }
+}) => {
     const mountRef = useRef<HTMLDivElement>(null);
+    const verifySectionRef = useRef<HTMLDivElement>(null);
+
+    // Desplazamiento suave hacia el validador integrado
+    const scrollToVerify = () => {
+        if (verifySectionRef.current) {
+            verifySectionRef.current.scrollIntoView({ behavior: 'smooth' });
+        }
+    };
 
     useEffect(() => {
         const currentMount = mountRef.current;
@@ -27,14 +40,12 @@ export const HeroLanding: React.FC<HeroLandingProps> = ({ onStart, onVerify }) =
         currentMount.appendChild(renderer.domElement);
 
         // Malla Ondulatoria Digital (Cyber Matrix Floor)
-        // Se ubica abajo para no tapar el título central
         const gridCols = 55;
         const gridRows = 45;
         const planeGeo = new THREE.PlaneGeometry(36, 26, gridCols, gridRows);
         planeGeo.rotateX(-Math.PI / 2.3);
         planeGeo.translate(0, -2.8, 0);
 
-        // Material de puntos luminosos con gradiente cian y carmesí
         const count = planeGeo.attributes.position.count;
         const colors = new Float32Array(count * 3);
 
@@ -61,7 +72,7 @@ export const HeroLanding: React.FC<HeroLandingProps> = ({ onStart, onVerify }) =
         const gridMesh = new THREE.Points(planeGeo, pointsMat);
         scene.add(gridMesh);
 
-        // Partículas de datos flotantes en el espacio superior
+        // Partículas de datos flotantes
         const dustCount = 350;
         const dustPos = new Float32Array(dustCount * 3);
         for (let i = 0; i < dustCount * 3; i++) {
@@ -78,10 +89,8 @@ export const HeroLanding: React.FC<HeroLandingProps> = ({ onStart, onVerify }) =
         const dustMesh = new THREE.Points(dustGeo, dustMat);
         scene.add(dustMesh);
 
-        // Posición original para calcular la oscilación ondulatoria
         const originalPositions = planeGeo.attributes.position.clone();
 
-        // Movimiento con el ratón
         let mouseX = 0;
         let mouseY = 0;
         const handleMouseMove = (e: MouseEvent) => {
@@ -90,7 +99,6 @@ export const HeroLanding: React.FC<HeroLandingProps> = ({ onStart, onVerify }) =
         };
         window.addEventListener('mousemove', handleMouseMove);
 
-        // Animación continua a 60 FPS
         let reqId: number;
         const clock = new THREE.Clock();
 
@@ -102,16 +110,13 @@ export const HeroLanding: React.FC<HeroLandingProps> = ({ onStart, onVerify }) =
             for (let i = 0; i < count; i++) {
                 const u = originalPositions.getX(i);
                 const v = originalPositions.getY(i);
-                // Función de onda senoidal suave (simula flujo de datos cifrados)
                 const wave = Math.sin(u * 0.4 + time * 1.5) * Math.cos(v * 0.4 + time * 1.2) * 0.6;
                 pos.setZ(i, originalPositions.getZ(i) + wave);
             }
             pos.needsUpdate = true;
 
-            // Rotación suave del polvo espacial
             dustMesh.rotation.y = time * 0.02;
 
-            // Parallax con el mouse
             camera.position.x += (mouseX * 1.2 - camera.position.x) * 0.04;
             camera.position.y += (-mouseY * 0.8 + 4 - camera.position.y) * 0.04;
             camera.lookAt(0, 0, 0);
@@ -143,214 +148,273 @@ export const HeroLanding: React.FC<HeroLandingProps> = ({ onStart, onVerify }) =
     }, []);
 
     return (
-        <div style={{
-            position: 'relative',
-            minHeight: 'calc(100vh - 80px)',
-            background: 'radial-gradient(circle at 50% 30%, #0d111a 0%, #06070a 80%)',
-            overflow: 'hidden',
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'center',
-            alignItems: 'center',
-            padding: '40px 20px',
-        }}>
-            {/* Canvas 3D de fondo (No bloquea clics ni texto) */}
-            <div
-                ref={mountRef}
-                style={{
+        <div style={{ width: '100%', position: 'relative' }}>
+            {/* -------------------------------------------------------------
+                SECCIÓN HERO: PORTADA Y ACCIONES PRINCIPALES
+               ------------------------------------------------------------- */}
+            <div style={{
+                position: 'relative',
+                minHeight: 'calc(100vh - 75px)',
+                background: 'radial-gradient(circle at 50% 30%, #0d111a 0%, #06070a 80%)',
+                overflow: 'hidden',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'center',
+                alignItems: 'center',
+                padding: '40px 20px',
+            }}>
+                {/* Canvas 3D de fondo */}
+                <div
+                    ref={mountRef}
+                    style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        width: '100%',
+                        height: '100%',
+                        zIndex: 1,
+                        pointerEvents: 'none',
+                    }}
+                />
+
+                {/* Capa de contraste translúcida */}
+                <div style={{
                     position: 'absolute',
                     top: 0,
                     left: 0,
                     width: '100%',
                     height: '100%',
-                    zIndex: 1,
-                    pointerEvents: 'none',
-                }}
-            />
+                    background: 'radial-gradient(ellipse at center, rgba(6,7,10,0.5) 0%, rgba(6,7,10,0.85) 75%)',
+                    zIndex: 2,
+                    pointerEvents: 'none'
+                }} />
 
-            {/* Degradado para garantizar legibilidad del 100% en el texto */}
-            <div style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                width: '100%',
-                height: '100%',
-                background: 'radial-gradient(ellipse at center, rgba(6,7,10,0.5) 0%, rgba(6,7,10,0.85) 75%)',
-                zIndex: 2,
-                pointerEvents: 'none'
-            }} />
+                {/* Contenido Central */}
+                <div style={{ position: 'relative', zIndex: 3, textAlign: 'center', maxWidth: 880 }}>
+                    {/* Badge superior de estado */}
+                    <div style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        background: 'rgba(239, 35, 60, 0.1)',
+                        border: '1px solid rgba(239, 35, 60, 0.3)',
+                        padding: '6px 14px',
+                        borderRadius: 20,
+                        fontSize: '11px',
+                        fontFamily: 'monospace',
+                        letterSpacing: '1.5px',
+                        color: '#ef4444',
+                        marginBottom: 20,
+                        fontWeight: 700
+                    }}>
+                        <span style={{
+                            width: 7,
+                            height: 7,
+                            borderRadius: '50%',
+                            background: '#ef4444',
+                            boxShadow: '0 0 8px #ef4444'
+                        }} />
+                        SISTEMA EN LÍNEA // ENTORNO CRIPTOGRÁFICO ACTIVO
+                    </div>
 
-            {/* Contenido Central */}
-            <div style={{ position: 'relative', zIndex: 3, textAlign: 'center', maxWidth: 880 }}>
-                {/* Badge superior */}
-                <div style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    background: 'rgba(239, 35, 60, 0.1)',
-                    border: '1px solid rgba(239, 35, 60, 0.3)',
-                    padding: '6px 14px',
-                    borderRadius: 20,
-                    fontSize: '11px',
-                    fontFamily: 'monospace',
-                    letterSpacing: '2px',
-                    color: '#ef4444',
-                    marginBottom: 20,
-                    fontWeight: 700
-                }}>
-                    <span style={{
-                        width: 7,
-                        height: 7,
-                        borderRadius: '50%',
-                        background: '#ef4444',
-                        boxShadow: '0 0 8px #ef4444'
-                    }} />
-                    SYSTEM ONLINE // NETWORK ENCRYPTION: ACTIVE
+                    {/* Título formal en español */}
+                    <h1 style={{
+                        fontSize: 'clamp(36px, 5.5vw, 64px)',
+                        fontWeight: 900,
+                        fontStyle: 'italic',
+                        letterSpacing: '-1.5px',
+                        lineHeight: 1.08,
+                        margin: '0 0 16px 0',
+                        textTransform: 'uppercase',
+                    }}>
+                        <span style={{ color: '#ffffff', textShadow: '0 0 25px rgba(255,255,255,0.2)' }}>
+                            MOTOR CRIPTOGRÁFICO
+                        </span>
+                        <br />
+                        <span style={{
+                            color: '#ef233c',
+                            textShadow: '0 0 35px rgba(239, 35, 60, 0.65)'
+                        }}>
+                            DE CONFIANZA DIGITAL
+                        </span>
+                    </h1>
+
+                    {/* Subtítulo institucional */}
+                    <p style={{
+                        color: '#94a3b8',
+                        fontSize: 'clamp(15px, 2vw, 17px)',
+                        maxWidth: 680,
+                        margin: '0 auto 36px auto',
+                        lineHeight: 1.6,
+                    }}>
+                        Garantizando la autenticidad, integridad y el no repudio de documentos electrónicos.
+                        Plataforma de firmado compatible con el estándar <strong>PAdES / PKCS#7</strong>, algoritmos <strong>RSA-2048</strong> y resumen <strong>SHA-256</strong>.
+                    </p>
+
+                    {/* Botones de Acción */}
+                    <div style={{ display: 'flex', gap: 16, justifyContent: 'center', flexWrap: 'wrap' }}>
+                        <button
+                            onClick={onStart}
+                            style={{
+                                padding: '15px 34px',
+                                background: '#ef233c',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '6px',
+                                fontSize: '13px',
+                                fontFamily: 'monospace',
+                                fontWeight: 800,
+                                letterSpacing: '1px',
+                                textTransform: 'uppercase',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 10,
+                                boxShadow: '0 0 25px rgba(239, 35, 60, 0.55)',
+                                transition: 'transform 0.15s ease'
+                            }}
+                            onMouseEnter={e => (e.currentTarget.style.transform = 'scale(1.04)')}
+                            onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1)')}
+                        >
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                <polyline points="14 2 14 8 20 8" />
+                                <line x1="12" x2="12" y1="18" y2="12" />
+                                <line x1="9" x2="15" y1="15" y2="15" />
+                            </svg>
+                            <span>INICIALIZAR FIRMADO DIGITAL &gt;</span>
+                        </button>
+
+                        <button
+                            onClick={scrollToVerify}
+                            style={{
+                                padding: '15px 28px',
+                                background: '#0d131f',
+                                color: '#38bdf8',
+                                border: '1px solid #1e3a5f',
+                                borderRadius: '6px',
+                                fontSize: '13px',
+                                fontFamily: 'monospace',
+                                fontWeight: 700,
+                                letterSpacing: '1px',
+                                textTransform: 'uppercase',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 10,
+                                transition: 'all 0.2s ease'
+                            }}
+                            onMouseEnter={e => {
+                                e.currentTarget.style.background = 'rgba(56, 189, 248, 0.15)';
+                                e.currentTarget.style.borderColor = '#38bdf8';
+                            }}
+                            onMouseLeave={e => {
+                                e.currentTarget.style.background = '#0d131f';
+                                e.currentTarget.style.borderColor = '#1e3a5f';
+                            }}
+                        >
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                                <path d="m9 12 2 2 4-4" />
+                            </svg>
+                            <span>AUDITAR INTEGRIDAD</span>
+                        </button>
+                    </div>
                 </div>
 
-                {/* Título de gran impacto con tipografía limpia */}
-                <h1 style={{
-                    fontSize: 'clamp(38px, 6vw, 68px)',
-                    fontWeight: 900,
-                    fontStyle: 'italic',
-                    letterSpacing: '-1.5px',
-                    lineHeight: 1.05,
-                    margin: '0 0 14px 0',
-                    textTransform: 'uppercase',
+                {/* Tarjetas Informativas Inferiores */}
+                <div style={{
+                    position: 'relative',
+                    zIndex: 3,
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                    gap: '16px',
+                    width: '100%',
+                    maxWidth: '880px',
+                    marginTop: '55px'
                 }}>
-                    <span style={{ color: '#ffffff', textShadow: '0 0 25px rgba(255,255,255,0.2)' }}>
-                        CRYPTOGRAPHIC
-                    </span>
-                    <br />
-                    <span style={{
-                        color: '#ef233c',
-                        textShadow: '0 0 35px rgba(239, 35, 60, 0.65)'
+                    <div style={{
+                        background: 'rgba(15, 18, 25, 0.8)',
+                        backdropFilter: 'blur(10px)',
+                        border: '1px solid #1e2433',
+                        borderLeft: '3px solid #ef233c',
+                        padding: '16px 20px',
+                        borderRadius: '6px'
                     }}>
-                        TRUST ENGINE
-                    </span>
-                </h1>
+                        <div style={{ fontSize: '10px', fontFamily: 'monospace', color: '#64748b' }}>CRIPTOSISTEMA ASIMÉTRICO</div>
+                        <div style={{ fontSize: '24px', fontWeight: 800, color: '#f8fafc', margin: '4px 0' }}>
+                            2048 <span style={{ fontSize: '12px', color: '#ef4444' }}>BITS</span>
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#94a3b8' }}>Par de llaves RSA en formato PEM</div>
+                    </div>
 
-                {/* Subtítulo nítido */}
-                <p style={{
-                    color: '#94a3b8',
-                    fontSize: 'clamp(15px, 2vw, 17px)',
-                    maxWidth: 640,
-                    margin: '0 auto 36px auto',
-                    lineHeight: 1.6,
-                }}>
-                    Redefiniendo la soberanía digital mediante firmas criptográficas inmutables.
-                    Experimenta la autenticidad e integridad respaldadas por algoritmos <strong>RSA-2048</strong> y <strong>SHA-256</strong>.
-                </p>
+                    <div style={{
+                        background: 'rgba(15, 18, 25, 0.8)',
+                        backdropFilter: 'blur(10px)',
+                        border: '1px solid #1e2433',
+                        borderLeft: '3px solid #38bdf8',
+                        padding: '16px 20px',
+                        borderRadius: '6px'
+                    }}>
+                        <div style={{ fontSize: '10px', fontFamily: 'monospace', color: '#64748b' }}>FUNCIÓN RESUMEN UNIDIRECCIONAL</div>
+                        <div style={{ fontSize: '24px', fontWeight: 800, color: '#38bdf8', margin: '4px 0' }}>SHA-256</div>
+                        <div style={{ fontSize: '11px', color: '#94a3b8' }}>Resistencia estricta a colisiones</div>
+                    </div>
 
-                {/* Botones de Acción */}
-                <div style={{ display: 'flex', gap: 16, justifyContent: 'center', flexWrap: 'wrap' }}>
-                    <button
-                        onClick={onStart}
-                        style={{
-                            padding: '16px 36px',
-                            background: '#ef233c',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: '6px',
-                            fontSize: '14px',
-                            fontFamily: 'monospace',
-                            fontWeight: 800,
-                            letterSpacing: '1px',
-                            textTransform: 'uppercase',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 8,
-                            boxShadow: '0 0 25px rgba(239, 35, 60, 0.55)',
-                            transition: 'transform 0.15s ease'
-                        }}
-                        onMouseEnter={e => (e.currentTarget.style.transform = 'scale(1.04)')}
-                        onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1)')}
-                    >
-                        ⚡ INITIALIZE SIGNATURE &gt;
-                    </button>
-
-                    <button
-                        onClick={onVerify}
-                        style={{
-                            padding: '16px 28px',
-                            background: '#0d131f',
-                            color: '#38bdf8',
-                            border: '1px solid #1e3a5f',
-                            borderRadius: '6px',
-                            fontSize: '14px',
-                            fontFamily: 'monospace',
-                            fontWeight: 700,
-                            letterSpacing: '1px',
-                            textTransform: 'uppercase',
-                            cursor: 'pointer',
-                            transition: 'all 0.2s ease'
-                        }}
-                        onMouseEnter={e => {
-                            e.currentTarget.style.background = 'rgba(56, 189, 248, 0.15)';
-                            e.currentTarget.style.borderColor = '#38bdf8';
-                        }}
-                        onMouseLeave={e => {
-                            e.currentTarget.style.background = '#0d131f';
-                            e.currentTarget.style.borderColor = '#1e3a5f';
-                        }}
-                    >
-                        🔍 VERIFY INTEGRITY
-                    </button>
+                    <div style={{
+                        background: 'rgba(15, 18, 25, 0.8)',
+                        backdropFilter: 'blur(10px)',
+                        border: '1px solid #1e2433',
+                        borderLeft: '3px solid #22c55e',
+                        padding: '16px 20px',
+                        borderRadius: '6px'
+                    }}>
+                        <div style={{ fontSize: '10px', fontFamily: 'monospace', color: '#64748b' }}>REPOSITORIO DE CLAVES</div>
+                        <div style={{ fontSize: '24px', fontWeight: 800, color: '#22c55e', margin: '4px 0' }}>SUPABASE</div>
+                        <div style={{ fontSize: '11px', color: '#94a3b8' }}>Seguridad RLS y custodia pública</div>
+                    </div>
                 </div>
             </div>
 
-            {/* Tarjetas Inferiores */}
-            <div style={{
-                position: 'relative',
-                zIndex: 3,
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-                gap: '16px',
-                width: '100%',
-                maxWidth: '880px',
-                marginTop: '60px'
-            }}>
-                <div style={{
-                    background: 'rgba(15, 18, 25, 0.75)',
-                    backdropFilter: 'blur(10px)',
-                    border: '1px solid #1e2433',
-                    borderLeft: '3px solid #ef233c',
-                    padding: '16px 20px',
-                    borderRadius: '6px'
-                }}>
-                    <div style={{ fontSize: '10px', fontFamily: 'monospace', color: '#64748b' }}>ALGORITMO ASIMÉTRICO</div>
-                    <div style={{ fontSize: '24px', fontWeight: 800, color: '#f8fafc', margin: '4px 0' }}>
-                        2048 <span style={{ fontSize: '12px', color: '#ef4444' }}>BITS</span>
+            {/* -------------------------------------------------------------
+                SECCIÓN DE AUDITORÍA INTEGRADA DIRECTAMENTE EN EL HOME
+               ------------------------------------------------------------- */}
+            <div
+                ref={verifySectionRef}
+                style={{
+                    position: 'relative',
+                    zIndex: 4,
+                    padding: '60px 24px 80px 24px',
+                    background: '#06070a',
+                    borderTop: '1px solid #1c2230',
+                }}
+            >
+                <div style={{ maxWidth: 880, margin: '0 auto 30px auto', textAlign: 'center' }}>
+                    <div style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        background: 'rgba(56, 189, 248, 0.1)',
+                        border: '1px solid rgba(56, 189, 248, 0.3)',
+                        padding: '5px 12px',
+                        borderRadius: 16,
+                        fontSize: '10px',
+                        fontFamily: 'monospace',
+                        color: '#38bdf8',
+                        marginBottom: 12
+                    }}>
+                        VERIFICACIÓN EN LÍNEA DISPONIBLE AL PÚBLICO
                     </div>
-                    <div style={{ fontSize: '11px', color: '#94a3b8' }}>Claves RSA PKCS#8 / SPKI (.PEM)</div>
+                    <h2 style={{ fontSize: '26px', fontWeight: 800, color: '#f8fafc', margin: '0 0 8px 0' }}>
+                        Auditoría Forense y Validación de Integridad
+                    </h2>
+                    <p style={{ fontSize: '13px', color: '#94a3b8', margin: 0 }}>
+                        Cualquier receptor o autoridad puede auditar la autenticidad del documento sin necesidad de iniciar sesión.
+                    </p>
                 </div>
 
-                <div style={{
-                    background: 'rgba(15, 18, 25, 0.75)',
-                    backdropFilter: 'blur(10px)',
-                    border: '1px solid #1e2433',
-                    borderLeft: '3px solid #ef233c',
-                    padding: '16px 20px',
-                    borderRadius: '6px'
-                }}>
-                    <div style={{ fontSize: '10px', fontFamily: 'monospace', color: '#64748b' }}>FUNCION RESUMEN</div>
-                    <div style={{ fontSize: '24px', fontWeight: 800, color: '#f8fafc', margin: '4px 0' }}>SHA-256</div>
-                    <div style={{ fontSize: '11px', color: '#94a3b8' }}>Integridad estricta y no colisión</div>
-                </div>
-
-                <div style={{
-                    background: 'rgba(15, 18, 25, 0.75)',
-                    backdropFilter: 'blur(10px)',
-                    border: '1px solid #1e2433',
-                    borderLeft: '3px solid #22c55e',
-                    padding: '16px 20px',
-                    borderRadius: '6px'
-                }}>
-                    <div style={{ fontSize: '10px', fontFamily: 'monospace', color: '#64748b' }}>BASE DE DATOS</div>
-                    <div style={{ fontSize: '24px', fontWeight: 800, color: '#22c55e', margin: '4px 0' }}>SUPABASE</div>
-                    <div style={{ fontSize: '11px', color: '#94a3b8' }}>Políticas RLS y Auth activo</div>
-                </div>
+                {/* Render del componente de validación */}
+                <VerifyView onError={onError} />
             </div>
         </div>
     );

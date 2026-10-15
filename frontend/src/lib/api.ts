@@ -1,6 +1,10 @@
-// Normalización inteligente: garantiza que siempre haya un solo "/api" al final
-const rawUrl = (import.meta.env.VITE_API_URL || 'http://localhost:3000').trim().replace(/\/+$/, '');
-const API_URL = rawUrl.endsWith('/api') ? rawUrl : `${rawUrl}/api`;
+// Normalización inteligente:
+// 1. Si hay VITE_API_URL explícita, se usa asegurando un único '/api'.
+// 2. Si no hay variable definida, se usa la ruta relativa '/api' del mismo host (ideal para Render unificado).
+const envUrl = (import.meta.env.VITE_API_URL || '').trim().replace(/\/+$/, '');
+const API_URL = envUrl
+  ? (envUrl.endsWith('/api') ? envUrl : `${envUrl}/api`)
+  : '/api';
 
 // 1. Registro de Usuario (con datos reales para Supabase)
 export async function registerApi(email: string, password: string, nombre: string, ci: string) {
@@ -30,7 +34,7 @@ export async function loginApi(email: string, password: string) {
   return res.json();
 }
 
-// 3. Generación del Par de Llaves RSA (2048-bit)
+// 3. Generación del Par de Llaves RSA (2048-bit) y Certificado X.509
 export async function generateKeysApi(userId: string) {
   const res = await fetch(`${API_URL}/keys/generate`, {
     method: 'POST',
@@ -44,7 +48,7 @@ export async function generateKeysApi(userId: string) {
   return res.json();
 }
 
-// 4. Firmar Documento PDF con Llave Privada
+// 4. Firmar Documento PDF con Llave Privada (Estándar PAdES / PKCS#7)
 export async function signPdfApi(file: File, privateKey: string, userId: string) {
   const formData = new FormData();
   formData.append('file', file);
@@ -62,7 +66,7 @@ export async function signPdfApi(file: File, privateKey: string, userId: string)
   return res.json();
 }
 
-// 5. Verificar Firma Digital de un PDF
+// 5. Verificar Firma Digital de un PDF (Auditoría Criptográfica)
 export async function verifyPdfApi(file: File) {
   const formData = new FormData();
   formData.append('file', file);

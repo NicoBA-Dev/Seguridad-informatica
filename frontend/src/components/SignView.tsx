@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import { signPdfApi } from '../lib/api';
 
 interface SignViewProps {
@@ -17,51 +17,12 @@ export const SignView: React.FC<SignViewProps> = ({
   onSuccess,
 }) => {
   const [pdfFile, setPdfFile] = useState<File | null>(null);
-  const [strokeColor, setStrokeColor] = useState('#ef233c');
-  const [lineWidth, setLineWidth] = useState(3);
   const [loading, setLoading] = useState(false);
+  const [progressStep, setProgressStep] = useState(0);
+  const [progressText, setProgressText] = useState('');
+  const [isDragOver, setIsDragOver] = useState(false);
 
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [isDrawing, setIsDrawing] = useState(false);
-
-  const startDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    ctx.beginPath();
-    ctx.moveTo(e.nativeEvent.offsetX, e.nativeEvent.offsetY);
-    ctx.strokeStyle = strokeColor;
-    ctx.lineWidth = lineWidth;
-    ctx.lineCap = 'round';
-    ctx.shadowBlur = 8;
-    ctx.shadowColor = strokeColor;
-    setIsDrawing(true);
-  };
-
-  const draw = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isDrawing) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    ctx.lineTo(e.nativeEvent.offsetX, e.nativeEvent.offsetY);
-    ctx.stroke();
-  };
-
-  const stopDrawing = () => setIsDrawing(false);
-
-  const clearCanvas = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-  };
-
-  // Subir llave privada directamente desde archivo
+  // Subir llave privada desde archivo .pem
   const handlePrivateKeyFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -71,23 +32,43 @@ export const SignView: React.FC<SignViewProps> = ({
       const content = event.target?.result as string;
       if (content.includes('BEGIN PRIVATE KEY') || content.includes('BEGIN RSA PRIVATE KEY')) {
         onPrivateKeyChange(content);
-        onSuccess(`Llave privada cargada desde ${file.name}`);
+        onSuccess(`Llave privada cargada con éxito desde ${file.name}`);
       } else {
-        onError('El archivo no tiene el formato estándar de llave privada PEM.');
+        onError('El archivo no posee una cabecera estándar de llave privada RSA PEM.');
       }
     };
     reader.readAsText(file);
   };
 
+  // Simulación de etapas visuales para el usuario
+  const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
   const handleSign = async () => {
-    if (!pdfFile) return onError('Selecciona el archivo PDF del informe para firmar.');
-    if (!privateKey) return onError('Sube tu Llave Privada RSA (.pem) o genérala en la pestaña 1.');
-    if (!currentUser?.user?.id) return onError('Debes haber iniciado sesión para estampar tu firma.');
+    if (!pdfFile) return onError('Selecciona o arrastra el archivo PDF a firmar.');
+    if (!privateKey) return onError('Carga tu Llave Privada RSA (.pem) para autorizar la firma.');
+    if (!currentUser?.user?.id) return onError('Debes haber iniciado sesión con tu cuenta.');
 
     setLoading(true);
+    setProgressStep(15);
+    setProgressText('Leyendo archivo y calculando función resumen SHA-256...');
+
     try {
+      await sleep(350);
+      setProgressStep(40);
+      setProgressText('Inyectando diccionario PAdES e incremental writer ISO 32000...');
+
+      await sleep(350);
+      setProgressStep(70);
+      setProgressText('Cifrando resumen con llave privada RSA y empaquetando PKCS#7...');
+
+      // Petición real al backend
       const res = await signPdfApi(pdfFile, privateKey, currentUser.user.id);
 
+      setProgressStep(95);
+      setProgressText('Estructurando PDF final y preparando descarga...');
+      await sleep(300);
+
+      // Descarga del PDF firmado
       const byteCharacters = atob(res.pdfBase64);
       const byteNumbers = new Array(byteCharacters.length);
       for (let i = 0; i < byteCharacters.length; i++) {
@@ -102,213 +83,277 @@ export const SignView: React.FC<SignViewProps> = ({
       a.click();
       URL.revokeObjectURL(url);
 
-      onSuccess(`¡Documento firmado con éxito! Se descargó Firmado_${pdfFile.name}`);
+      setProgressStep(100);
+      setProgressText('¡Firma completada con éxito!');
+      await sleep(400);
+
+      onSuccess(`¡Documento firmado exitosamente! Se descargó: Firmado_${pdfFile.name}`);
     } catch (err: any) {
-      onError(err.message);
+      onError(err.message || 'Error durante el firmado');
     } finally {
       setLoading(false);
+      setProgressStep(0);
+      setProgressText('');
     }
   };
 
   return (
-    <div style={{ maxWidth: 940, margin: '0 auto', paddingBottom: 40 }}>
+    <div style={{ maxWidth: 840, margin: '0 auto', paddingBottom: 50, position: 'relative' }}>
+      {/* MODAL DE PROGRESO / SPINNER ANIMADO */}
+      {loading && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100vw',
+          height: '100vh',
+          background: 'rgba(5, 7, 10, 0.85)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999
+        }}>
+          <div style={{
+            background: '#0d1117',
+            border: '1px solid #1f293d',
+            borderRadius: 12,
+            padding: '36px 32px',
+            width: '90%',
+            maxWidth: 460,
+            textAlign: 'center',
+            boxShadow: '0 25px 60px rgba(0, 0, 0, 0.9), 0 0 30px rgba(239, 35, 60, 0.15)'
+          }}>
+            {/* Spinner circular con degradado */}
+            <div style={{
+              width: 56,
+              height: 56,
+              margin: '0 auto 20px auto',
+              border: '3px solid rgba(239, 35, 60, 0.15)',
+              borderTopColor: '#ef233c',
+              borderRadius: '50%',
+              animation: 'spin 0.8s linear infinite'
+            }} />
+
+            <h3 style={{ margin: '0 0 8px 0', fontSize: '17px', color: '#f8fafc', fontWeight: 800 }}>
+              ESTAMPANDO FIRMA DIGITAL
+            </h3>
+            <p style={{ margin: '0 0 20px 0', fontSize: '12px', fontFamily: 'monospace', color: '#94a3b8', minHeight: 32 }}>
+              {progressText}
+            </p>
+
+            {/* Barra de progreso */}
+            <div style={{
+              width: '100%',
+              height: 6,
+              background: '#161b26',
+              borderRadius: 3,
+              overflow: 'hidden',
+              marginBottom: 10
+            }}>
+              <div style={{
+                width: `${progressStep}%`,
+                height: '100%',
+                background: 'linear-gradient(90deg, #ef233c, #38bdf8)',
+                transition: 'width 0.3s ease'
+              }} />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', fontFamily: 'monospace', color: '#64748b' }}>
+              <span>PROCESANDO ARTEFACTO CRIPTOGRÁFICO</span>
+              <span style={{ color: '#ef4444', fontWeight: 700 }}>{progressStep}%</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Estilos para animación de rotación */}
+      <style>{`
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
+
       {/* Encabezado */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 24 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 28 }}>
         <div>
-          <h2 style={{ margin: 0, fontStyle: 'italic', fontWeight: 900, fontSize: '28px', letterSpacing: '1px' }}>
-            <span style={{ color: '#ffffff' }}>ARQUITECTO DE </span>
-            <span style={{ color: '#ef233c' }}>FIRMA</span>
+          <h2 style={{ margin: 0, fontStyle: 'italic', fontWeight: 900, fontSize: '30px', letterSpacing: '1px' }}>
+            <span style={{ color: '#ffffff' }}>MÓDULO DE </span>
+            <span style={{ color: '#ef233c' }}>FIRMADO DIGITAL</span>
           </h2>
-          <div style={{ fontSize: '10px', fontFamily: 'monospace', letterSpacing: '2px', color: '#64748b', marginTop: 4 }}>
-            ESTAMPADO CRIPTOGRÁFICO &amp; NO REPUDIO
+          <div style={{ fontSize: '11px', fontFamily: 'monospace', letterSpacing: '2px', color: '#64748b', marginTop: 4 }}>
+            ESTÁNDAR PAdES-BES / PKCS#7 · SHA-256 CON RSA-2048
           </div>
         </div>
 
-        <span style={{ fontSize: '11px', fontFamily: 'monospace', color: '#38bdf8', background: '#0d1017', padding: '4px 10px', borderRadius: 4, border: '1px solid #1c2230' }}>
-          PAdES / PKCS#7 CERTIFICADO
+        <span style={{
+          fontSize: '11px',
+          fontFamily: 'monospace',
+          color: '#38bdf8',
+          background: '#0d1017',
+          padding: '6px 14px',
+          borderRadius: 6,
+          border: '1px solid #1c2230'
+        }}>
+          ● ADOBE READER COMPATIBLE
         </span>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '290px 1fr', gap: 20 }}>
-        {/* Panel Izquierdo: Configuración */}
-        <div style={{
-          background: 'rgba(11, 13, 19, 0.95)',
-          border: '1px solid #1c2230',
-          borderRadius: 8,
-          padding: 22,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 16
-        }}>
-          {/* Carga de PDF */}
-          <div>
-            <label style={{ fontSize: '10px', fontFamily: 'monospace', color: '#64748b', display: 'block', marginBottom: 6 }}>
-              DOCUMENTO A FIRMAR (PDF)
-            </label>
+      {/* Tarjeta de Formulario */}
+      <div style={{
+        background: 'rgba(11, 13, 19, 0.95)',
+        border: '1px solid #1c2230',
+        borderRadius: 10,
+        padding: 32,
+        boxShadow: '0 20px 50px rgba(0, 0, 0, 0.8)'
+      }}>
+        {/* Paso 1: Carga de PDF */}
+        <div style={{ marginBottom: 24 }}>
+          <label style={{ fontSize: '11px', fontFamily: 'monospace', color: '#ef4444', letterSpacing: '1px', display: 'block', marginBottom: 10 }}>
+            01. DOCUMENTO ORIGINAL (PDF)
+          </label>
+          <div
+            onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+            onDragLeave={() => setIsDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setIsDragOver(false);
+              if (e.dataTransfer.files?.[0]) setPdfFile(e.dataTransfer.files[0]);
+            }}
+            onClick={() => document.getElementById('pdf-file-sign')?.click()}
+            style={{
+              border: isDragOver ? '1px dashed #ef4444' : '1px dashed #26334a',
+              background: isDragOver ? 'rgba(239, 35, 60, 0.08)' : '#07080c',
+              borderRadius: 6,
+              padding: '28px 20px',
+              textAlign: 'center',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease'
+            }}
+          >
+            <div style={{ fontSize: '28px', marginBottom: 8 }}>📄</div>
+            <div style={{ fontSize: '13px', fontFamily: 'monospace', fontWeight: 700, color: pdfFile ? '#f8fafc' : '#94a3b8' }}>
+              {pdfFile ? pdfFile.name : 'ARRASTRA EL ARCHIVO PDF AQUÍ O HAZ CLIC PARA SELECCIONAR'}
+            </div>
+            {pdfFile ? (
+              <div style={{ fontSize: '11px', color: '#22c55e', marginTop: 6, fontFamily: 'monospace' }}>
+                ✓ Documento cargado ({(pdfFile.size / 1024).toFixed(1)} KB)
+              </div>
+            ) : (
+              <div style={{ fontSize: '10px', color: '#64748b', marginTop: 4, fontFamily: 'monospace' }}>
+                Formato admitido: Documento PDF legible
+              </div>
+            )}
             <input
+              id="pdf-file-sign"
               type="file"
               accept="application/pdf"
               onChange={e => setPdfFile(e.target.files?.[0] || null)}
-              style={{ fontSize: '12px', color: '#94a3b8', width: '100%' }}
-            />
-          </div>
-
-          {/* Carga de Llave Privada con botón de archivo */}
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-              <label style={{ fontSize: '10px', fontFamily: 'monospace', color: '#64748b' }}>
-                LLAVE PRIVADA (.PEM)
-              </label>
-              <label style={{ fontSize: '10px', fontFamily: 'monospace', color: '#38bdf8', cursor: 'pointer', textDecoration: 'underline' }}>
-                Subir .pem
-                <input
-                  type="file"
-                  accept=".pem,.key,.txt"
-                  onChange={handlePrivateKeyFileUpload}
-                  style={{ display: 'none' }}
-                />
-              </label>
-            </div>
-            <textarea
-              rows={4}
-              value={privateKey}
-              onChange={e => onPrivateKeyChange(e.target.value)}
-              placeholder="Pega tu llave privada o cárgala con el botón de arriba"
-              style={{
-                width: '100%',
-                background: '#07080c',
-                border: '1px solid #1c2230',
-                color: '#f8fafc',
-                padding: '8px',
-                borderRadius: 4,
-                fontFamily: 'monospace',
-                fontSize: 10,
-                outline: 'none',
-                resize: 'none'
-              }}
-            />
-          </div>
-
-          {/* Color del trazo */}
-          <div>
-            <label style={{ fontSize: '10px', fontFamily: 'monospace', color: '#64748b', display: 'block', marginBottom: 6 }}>
-              COLOR DEL TRAZO VISUAL
-            </label>
-            <div style={{ display: 'flex', gap: 10 }}>
-              {['#ef233c', '#ffffff', '#38bdf8'].map(c => (
-                <button
-                  key={c}
-                  type="button"
-                  onClick={() => setStrokeColor(c)}
-                  style={{
-                    width: 26,
-                    height: 26,
-                    borderRadius: '50%',
-                    background: c,
-                    border: strokeColor === c ? '2px solid white' : '1px solid #334155',
-                    cursor: 'pointer',
-                    boxShadow: strokeColor === c ? `0 0 10px ${c}` : 'none'
-                  }}
-                />
-              ))}
-            </div>
-          </div>
-
-          {/* Grosor */}
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', fontFamily: 'monospace', color: '#64748b', marginBottom: 6 }}>
-              <span>GROSOR DE TRAZO</span>
-              <span style={{ color: '#ef4444' }}>{lineWidth}px</span>
-            </div>
-            <input
-              type="range"
-              min="1"
-              max="6"
-              value={lineWidth}
-              onChange={e => setLineWidth(Number(e.target.value))}
-              style={{ width: '100%', accentColor: '#ef233c' }}
+              style={{ display: 'none' }}
             />
           </div>
         </div>
 
-        {/* Panel Derecho: Lienzo de Firma */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div style={{
-            position: 'relative',
-            background: '#06070a',
-            border: '1px solid #1c2230',
-            borderRadius: 8,
-            overflow: 'hidden',
-            height: 380,
+        {/* Paso 2: Llave Privada */}
+        <div style={{ marginBottom: 24 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <label style={{ fontSize: '11px', fontFamily: 'monospace', color: '#ef4444', letterSpacing: '1px' }}>
+              02. LLAVE PRIVADA DEL FIRMANTE (.PEM)
+            </label>
+            <label style={{ fontSize: '11px', fontFamily: 'monospace', color: '#38bdf8', cursor: 'pointer', textDecoration: 'underline' }}>
+              📂 Subir archivo .pem
+              <input
+                type="file"
+                accept=".pem,.key,.txt"
+                onChange={handlePrivateKeyFileUpload}
+                style={{ display: 'none' }}
+              />
+            </label>
+          </div>
+
+          <textarea
+            rows={4}
+            value={privateKey}
+            onChange={e => onPrivateKeyChange(e.target.value)}
+            placeholder="Pega tu llave privada PEM o cárgala con el botón superior..."
+            style={{
+              width: '100%',
+              background: '#07080c',
+              border: privateKey ? '1px solid #166534' : '1px solid #1c2230',
+              color: '#f8fafc',
+              padding: '12px',
+              borderRadius: 6,
+              fontFamily: 'monospace',
+              fontSize: 11,
+              outline: 'none',
+              resize: 'vertical',
+              lineHeight: 1.5
+            }}
+          />
+          {privateKey ? (
+            <div style={{ fontSize: '11px', color: '#22c55e', marginTop: 6, fontFamily: 'monospace' }}>
+              ● Llave privada vinculada y lista para autorizar la firma.
+            </div>
+          ) : (
+            <div style={{ fontSize: '11px', color: '#f59e0b', marginTop: 6, fontFamily: 'monospace' }}>
+              ○ Falta llave privada. Cárgala o genérala en la pestaña <strong>"Mis Llaves"</strong>.
+            </div>
+          )}
+        </div>
+
+        {/* Resumen de Certificación */}
+        <div style={{
+          background: 'rgba(0, 0, 0, 0.4)',
+          border: '1px solid #1c2230',
+          borderRadius: 6,
+          padding: 16,
+          marginBottom: 24,
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+          gap: 12,
+          fontSize: '11px',
+          fontFamily: 'monospace'
+        }}>
+          <div>
+            <span style={{ color: '#64748b' }}>FIRMANTE:</span>{' '}
+            <strong style={{ color: '#f8fafc' }}>{currentUser?.perfil?.nombre || 'Usuario Autenticado'}</strong>
+          </div>
+          <div>
+            <span style={{ color: '#64748b' }}>CRIPTOSISTEMA:</span>{' '}
+            <strong style={{ color: '#38bdf8' }}>RSA 2048-bit + SHA-256</strong>
+          </div>
+          <div>
+            <span style={{ color: '#64748b' }}>ESTÁNDAR:</span>{' '}
+            <strong style={{ color: '#22c55e' }}>PAdES-BES / PKCS#7</strong>
+          </div>
+        </div>
+
+        {/* Botón de Ejecución */}
+        <button
+          onClick={handleSign}
+          disabled={loading || !pdfFile || !privateKey}
+          style={{
+            width: '100%',
+            padding: '15px',
+            background: (!pdfFile || !privateKey) ? '#1e2430' : '#ef233c',
+            color: 'white',
+            border: 'none',
+            borderRadius: 6,
+            fontFamily: 'monospace',
+            fontWeight: 800,
+            fontSize: '13px',
+            letterSpacing: '1px',
+            cursor: (!pdfFile || !privateKey || loading) ? 'not-allowed' : 'pointer',
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center'
-          }}>
-            <canvas
-              ref={canvasRef}
-              width={600}
-              height={380}
-              onMouseDown={startDrawing}
-              onMouseMove={draw}
-              onMouseUp={stopDrawing}
-              onMouseLeave={stopDrawing}
-              style={{ cursor: 'crosshair', width: '100%', height: '100%' }}
-            />
-
-            <div style={{
-              position: 'absolute',
-              bottom: 12,
-              left: 14,
-              fontSize: '10px',
-              fontFamily: 'monospace',
-              color: '#475569',
-              pointerEvents: 'none'
-            }}>
-              DIBUJA TU RÚBRICA SOBRE ESTE LIENZO CON EL RATÓN
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
-            <button
-              onClick={clearCanvas}
-              style={{
-                padding: '12px 20px',
-                background: 'transparent',
-                color: '#94a3b8',
-                border: '1px solid #1c2230',
-                borderRadius: 4,
-                fontFamily: 'monospace',
-                fontSize: '12px',
-                cursor: 'pointer'
-              }}
-            >
-              LIMPIAR LIENZO
-            </button>
-
-            <button
-              onClick={handleSign}
-              disabled={loading || !pdfFile || !privateKey}
-              style={{
-                padding: '12px 30px',
-                background: '#ef233c',
-                color: 'white',
-                border: 'none',
-                borderRadius: 4,
-                fontFamily: 'monospace',
-                fontWeight: 800,
-                fontSize: '12px',
-                letterSpacing: '1px',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                boxShadow: '0 0 20px rgba(239, 35, 60, 0.45)'
-              }}
-            >
-              {loading ? 'FIRMANDO...' : 'EJECUTAR FIRMADO DIGITAL >'}
-            </button>
-          </div>
-        </div>
+            justifyContent: 'center',
+            gap: 10,
+            boxShadow: (!pdfFile || !privateKey) ? 'none' : '0 0 25px rgba(239, 35, 60, 0.45)',
+            transition: 'all 0.2s'
+          }}
+        >
+          ⚡ EJECUTAR FIRMADO DIGITAL Y DESCARGAR &gt;
+        </button>
       </div>
     </div>
   );

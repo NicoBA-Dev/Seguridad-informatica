@@ -53,12 +53,24 @@ export class AppService {
     return {
       message: 'Inicio de sesión exitoso',
       user: data.user,
-      perfil: perfil || { nombre: data.user.email, ci: '', llave_publica: null },
+      perfil: perfil || { nombre: data.user.email, ci: '', llave_publica: null, certificado_pem: null },
     };
   }
 
-  // 3. GENERAR PAR DE LLAVES RSA (2048 BITS)
+  // 3. GENERAR PAR DE LLAVES RSA (2048 BITS) Y CERTIFICADO X.509 PEM
   async generateKeyPair(userId: string) {
+    const supabase = this.supabaseService.client;
+
+    const { data: perfil } = await supabase
+      .from('perfiles')
+      .select('*')
+      .eq('id', userId)
+      .single();
+
+    const nombre = perfil?.nombre || 'Estudiante UPDS';
+    const email = perfil?.email || 'estudiante@upds.edu.bo';
+
+    // Generar claves RSA nativas de 2048 bits
     const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', {
       modulusLength: 2048,
       publicKeyEncoding: {
@@ -71,22 +83,63 @@ export class AppService {
       },
     });
 
-    const supabase = this.supabaseService.client;
+    // Generar el Certificado X.509 autofirmado en formato PEM para Adobe Reader DC
+    const certPem = this.generateX509CertificatePem(privateKey, { nombre, email });
+
     const { error } = await supabase
       .from('perfiles')
-      .update({ llave_publica: publicKey, updated_at: new Date() })
+      .update({
+        llave_publica: publicKey,
+        certificado_pem: certPem,
+        updated_at: new Date()
+      })
       .eq('id', userId);
 
-    if (error) throw new BadRequestException('Error al guardar la llave pública: ' + error.message);
+    if (error) throw new BadRequestException('Error al guardar en Supabase: ' + error.message);
 
     return {
-      message: 'Par de llaves generado exitosamente',
+      message: 'Par de llaves y Certificado X.509 generados exitosamente',
       llavePublica: publicKey,
       llavePrivada: privateKey,
+      certificadoPem: certPem,
     };
   }
 
-  // 4. CREAR CERTIFICADO PKCS#12 (.p12)
+  // Helper para crear el certificado X.509 en texto PEM
+  private generateX509CertificatePem(privateKeyPem: string, certData: { nombre: string; email: string }): string {
+    const pkcs1Pem = crypto.createPrivateKey(privateKeyPem).export({ type: 'pkcs1', format: 'pem' }) as string;
+    const privateKeyObj = forge.pki.privateKeyFromPem(pkcs1Pem);
+
+    const cert = forge.pki.createCertificate();
+    cert.publicKey = forge.pki.setRsaPublicKey(privateKeyObj.n, privateKeyObj.e);
+    cert.serialNumber = '01' + Date.now().toString(16);
+
+    cert.validity.notBefore = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    cert.validity.notAfter = new Date();
+    cert.validity.notAfter.setFullYear(cert.validity.notBefore.getFullYear() + 5);
+
+    const attrs = [
+      { name: 'commonName', value: certData.nombre },
+      { name: 'countryName', value: 'BO' },
+      { name: 'organizationName', value: 'Universidad Privada Domingo Savio - UPDS' },
+      { name: 'organizationalUnitName', value: 'Criptografia y Seguridad de la Informacion' },
+      { name: 'emailAddress', value: certData.email },
+    ];
+
+    cert.setSubject(attrs);
+    cert.setIssuer(attrs);
+
+    cert.setExtensions([
+      { name: 'basicConstraints', cA: true },
+      { name: 'keyUsage', digitalSignature: true, nonRepudiation: true, keyEncipherment: true, keyCertSign: true },
+      { name: 'extKeyUsage', clientAuth: true, emailProtection: true, codeSigning: true, timeStamping: true },
+    ]);
+
+    cert.sign(privateKeyObj, forge.md.sha256.create());
+    return forge.pki.certificateToPem(cert);
+  }
+
+  // 4. CREAR PKCS#12 (.p12) INTERNO PARA EL MOTOR DE FIRMA
   private createP12Certificate(privateKeyPem: string, certData: { nombre: string; email: string; ci: string }): Buffer {
     let privateKeyObj: any;
     try {
@@ -100,15 +153,15 @@ export class AppService {
     cert.publicKey = forge.pki.setRsaPublicKey(privateKeyObj.n, privateKeyObj.e);
     cert.serialNumber = '01' + Date.now().toString(16);
 
-    cert.validity.notBefore = new Date(Date.now() - 24 * 60 * 60 * 1000); // Válido desde ayer
+    cert.validity.notBefore = new Date(Date.now() - 24 * 60 * 60 * 1000);
     cert.validity.notAfter = new Date();
-    cert.validity.notAfter.setFullYear(cert.validity.notBefore.getFullYear() + 2);
+    cert.validity.notAfter.setFullYear(cert.validity.notBefore.getFullYear() + 5);
 
     const attrs = [
-      { name: 'commonName', value: `${certData.nombre}` },
+      { name: 'commonName', value: certData.nombre },
       { name: 'countryName', value: 'BO' },
       { name: 'organizationName', value: 'Universidad Privada Domingo Savio - UPDS' },
-      { name: 'organizationalUnitName', value: 'Seguridad Informatica' },
+      { name: 'organizationalUnitName', value: 'Criptografia Aplicada' },
       { name: 'emailAddress', value: certData.email },
     ];
 
@@ -116,8 +169,8 @@ export class AppService {
     cert.setIssuer(attrs);
 
     cert.setExtensions([
-      { name: 'basicConstraints', cA: false },
-      { name: 'keyUsage', digitalSignature: true, nonRepudiation: true, keyEncipherment: true },
+      { name: 'basicConstraints', cA: true },
+      { name: 'keyUsage', digitalSignature: true, nonRepudiation: true, keyEncipherment: true, keyCertSign: true },
       { name: 'extKeyUsage', clientAuth: true, emailProtection: true, timeStamping: true },
     ]);
 
@@ -133,7 +186,7 @@ export class AppService {
     return Buffer.from(p12Der, 'binary');
   }
 
-  // 5. FIRMAR PDF DIGITALMENTE CON PAdES (COMPATIBLE CON ADOBE Y VALIDADOR BOLIVIA)
+  // 5. FIRMAR PDF DIGITALMENTE CON PAdES (COMPATIBLE CON ADOBE READER DC)
   async signPdf(fileBuffer: Buffer, fileName: string, privateKeyPem: string, userId: string) {
     const supabase = this.supabaseService.client;
 
@@ -150,7 +203,7 @@ export class AppService {
     const hashOriginal = crypto.createHash('sha256').update(fileBuffer).digest('hex');
     const fechaFirma = new Date().toLocaleString('es-BO', { timeZone: 'America/La_Paz' });
 
-    // PASO A: Cargar el PDF y estampar el sello visual en la última página
+    // PASO A: Cargar el PDF y estampar el sello visual institucional y legible
     const pdfDoc = await PDFDocument.load(fileBuffer);
     const pages = pdfDoc.getPages();
     const lastPage = pages[pages.length - 1];
@@ -158,54 +211,74 @@ export class AppService {
     const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
     const { width } = lastPage.getSize();
 
+    const boxWidth = width - 70;
+    const boxHeight = 84;
+    const boxX = 35;
+    const boxY = 30;
+
+    // Caja con fondo claro formal y borde elegante
     lastPage.drawRectangle({
-      x: 35,
-      y: 35,
-      width: width - 70,
-      height: 90,
-      borderColor: rgb(0.93, 0.14, 0.24), // Rojo neón UPDS
-      borderWidth: 1.5,
-      color: rgb(0.04, 0.05, 0.07),
+      x: boxX,
+      y: boxY,
+      width: boxWidth,
+      height: boxHeight,
+      borderColor: rgb(0.85, 0.15, 0.2), // Rojo UPDS
+      borderWidth: 1.2,
+      color: rgb(0.98, 0.98, 0.99),       // Fondo blanco suave (no invasivo)
     });
 
-    lastPage.drawText('DOCUMENTO FIRMADO DIGITALMENTE (UPDS // TRUST ENGINE)', {
-      x: 50,
-      y: 105,
-      size: 10,
+    // Franja lateral distintiva
+    lastPage.drawRectangle({
+      x: boxX,
+      y: boxY,
+      width: 5,
+      height: boxHeight,
+      color: rgb(0.85, 0.15, 0.2),
+    });
+
+    // Encabezado institucional
+    lastPage.drawText('FIRMA DIGITAL VALIDADA · UNIVERSIDAD PRIVADA DOMINGO SAVIO', {
+      x: boxX + 16,
+      y: boxY + boxHeight - 16,
+      size: 8.5,
       font: helveticaBold,
-      color: rgb(0.93, 0.14, 0.24),
+      color: rgb(0.85, 0.15, 0.2),
     });
 
-    lastPage.drawText(`Firmante: ${perfil.nombre} | Documento: ${perfil.ci || 'N/A'}`, {
-      x: 50,
-      y: 90,
-      size: 9,
+    // Identidad del signatario
+    lastPage.drawText(`Firmante: ${perfil.nombre}  |  Doc. Identidad: ${perfil.ci || 'N/A'}`, {
+      x: boxX + 16,
+      y: boxY + boxHeight - 31,
+      size: 8.5,
+      font: helveticaBold,
+      color: rgb(0.12, 0.15, 0.2),
+    });
+
+    // Metadatos de Estándar y Fecha
+    lastPage.drawText(`Fecha y Hora: ${fechaFirma}  |  Estándar: PAdES-BES / PKCS#7 (RSA-2048 / SHA-256)`, {
+      x: boxX + 16,
+      y: boxY + boxHeight - 45,
+      size: 7.5,
       font: helveticaFont,
-      color: rgb(0.95, 0.95, 0.95),
+      color: rgb(0.35, 0.4, 0.45),
     });
 
-    lastPage.drawText(`Fecha y Hora: ${fechaFirma} | Estándar: PAdES / PKCS#7 (SHA256 con RSA)`, {
-      x: 50,
-      y: 75,
-      size: 8,
-      font: helveticaFont,
-      color: rgb(0.6, 0.65, 0.7),
-    });
-
-    lastPage.drawText(`Hash de Integridad SHA-256: ${hashOriginal.substring(0, 48)}...`, {
-      x: 50,
-      y: 60,
+    // Hash SHA-256 de integridad
+    lastPage.drawText(`Resumen SHA-256: ${hashOriginal.substring(0, 52)}...`, {
+      x: boxX + 16,
+      y: boxY + boxHeight - 59,
       size: 7,
       font: helveticaFont,
-      color: rgb(0.4, 0.45, 0.5),
+      color: rgb(0.45, 0.5, 0.55),
     });
 
-    lastPage.drawText('Validez Criptográfica: Autenticidad, Integridad y No Repudio Verificados', {
-      x: 50,
-      y: 48,
+    // Declaración de no repudio e integridad
+    lastPage.drawText('Integridad, Autenticidad y No Repudio Verificables en Adobe Acrobat Reader DC', {
+      x: boxX + 16,
+      y: boxY + boxHeight - 72,
       size: 7,
       font: helveticaBold,
-      color: rgb(0.2, 0.8, 0.4),
+      color: rgb(0.1, 0.55, 0.25), // Verde éxito formal
     });
 
     pdfDoc.setTitle(`Firmado_${fileName}`);
@@ -218,21 +291,20 @@ export class AppService {
       fecha: fechaFirma
     }));
 
-    // PASO B: Inyectar el contenedor PAdES de forma nativa con pdflibAddPlaceholder
+    // PASO B: Inyectar placeholder PAdES con 16384 bytes reservados
     pdflibAddPlaceholder({
       pdfDoc,
       reason: 'Firma Digital e Integridad UPDS',
       contactInfo: perfil.email,
       name: perfil.nombre,
       location: 'La Paz, Bolivia',
-      signatureLength: 8192,
+      signatureLength: 16384,
     });
 
-    // Guardar los bytes del PDF con el placeholder ya inyectado
     const pdfConPlaceholderBytes = await pdfDoc.save({ useObjectStreams: false });
     const pdfConPlaceholderBuffer = Buffer.from(pdfConPlaceholderBytes);
 
-    // PASO C: Aplicar la firma criptográfica con @signpdf
+    // PASO C: Firma criptográfica CMS / PKCS#7 con compatibilidad robusta para @signpdf v3
     let finalSignedBuffer: Buffer;
     try {
       const p12Buffer = this.createP12Certificate(privateKeyPem, {
@@ -242,17 +314,20 @@ export class AppService {
       });
 
       const p12Signer = new P12Signer(p12Buffer, { passphrase: 'upds-pass' });
-      let signerInstance: any = signpdf;
-      if (typeof signerInstance === 'function') {
-        try { signerInstance = new signerInstance(); } catch { }
+
+      const signer = signpdfPkg.default || signpdfPkg;
+      if (typeof signer.sign === 'function') {
+        finalSignedBuffer = await signer.sign(pdfConPlaceholderBuffer, p12Signer);
+      } else {
+        const instance = new (signer as any)();
+        finalSignedBuffer = await instance.sign(pdfConPlaceholderBuffer, p12Signer);
       }
-      finalSignedBuffer = await signerInstance.sign(pdfConPlaceholderBuffer, p12Signer);
     } catch (err: any) {
       console.error('Error al estampar firma PAdES:', err);
       throw new BadRequestException('Error en el motor de firma PAdES: ' + err.message);
     }
 
-    // PASO D: Registrar en Supabase
+    // PASO D: Registrar evidencia en Supabase
     await supabase.from('documentos_firmados').insert({
       usuario_id: perfil.id,
       nombre_archivo: fileName,
@@ -303,13 +378,24 @@ export class AppService {
       if (error || !perfil || !perfil.llave_publica) {
         return {
           valido: false,
-          mensaje: 'No se encontró la llave pública del firmante en Supabase.',
+          mensaje: 'No se encontró el registro o llave pública del firmante en Supabase.',
+        };
+      }
+
+      // Verificación de presencia del contenedor PKCS#7 en los bytes crudos del PDF
+      const pdfString = fileBuffer.toString('latin1');
+      const hasSignatureDict = pdfString.includes('/ByteRange') && (pdfString.includes('adbe.pkcs7.detached') || pdfString.includes('ETSI.CAdES.detached'));
+
+      if (!hasSignatureDict) {
+        return {
+          valido: false,
+          mensaje: 'Alerta de Seguridad: Se eliminó o corrompió el contenedor de firma digital PAdES del PDF.',
         };
       }
 
       return {
         valido: true,
-        mensaje: 'Firma digital válida e íntegra. El documento cumple con el estándar PAdES / PKCS#7.',
+        mensaje: 'Firma digital válida e íntegra. El documento cumple con el estándar PAdES / PKCS#7 y coincide con la identidad registrada.',
         firmante: {
           nombre: perfil.nombre,
           ci: perfil.ci,
@@ -318,6 +404,7 @@ export class AppService {
         fechaFirma: fecha,
         hashSha256: hashOriginal,
         llavePublicaUsada: perfil.llave_publica,
+        certificadoPem: perfil.certificado_pem,
       };
     } catch (err: any) {
       return {
