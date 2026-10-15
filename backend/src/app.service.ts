@@ -18,7 +18,7 @@ export class AppService {
     return 'API de Firma Digital UPDS funcionando';
   }
 
-  // 1. REGISTRO EN SUPABASE AUTH Y CREACIÓN DE PERFIL INICIAL
+  // 1. REGISTRO EN SUPABASE AUTH (El Trigger on_auth_user_created inserta en public.perfiles)
   async registerUser(email: string, password: string, nombre: string, ci: string) {
     const supabase = this.supabaseService.client;
     const { data, error } = await supabase.auth.signUp({
@@ -29,10 +29,11 @@ export class AppService {
 
     if (error) throw new BadRequestException('Error al registrar usuario: ' + error.message);
 
+    // Aseguramos que la fila de perfiles tenga los datos actualizados
     if (data.user) {
-      // Garantizar que la fila exista en public.perfiles
       await supabase.from('perfiles').upsert({
         id: data.user.id,
+        email: email,
         nombre: nombre || email,
         ci: ci || '',
         updated_at: new Date(),
@@ -63,7 +64,7 @@ export class AppService {
     return {
       message: 'Inicio de sesión exitoso',
       user: data.user,
-      perfil: perfil || { nombre: data.user.email, ci: '', llave_publica: null, certificado_pem: null },
+      perfil: perfil || { nombre: data.user.email, email: data.user.email, ci: '', llave_publica: null, certificado_pem: null },
     };
   }
 
@@ -71,16 +72,29 @@ export class AppService {
   async generateKeyPair(userId: string) {
     const supabase = this.supabaseService.client;
 
+    // 1. Buscar perfil existente
     const { data: perfil } = await supabase
       .from('perfiles')
       .select('*')
       .eq('id', userId)
       .maybeSingle();
 
-    const nombre = perfil?.nombre || 'Estudiante UPDS';
-    const email = perfil?.email || 'estudiante@upds.edu.bo';
+    // 2. Obtener email garantizado (si no está en perfiles, se consulta en Auth)
+    let userEmail = perfil?.email;
+    let userName = perfil?.nombre;
+    let userCi = perfil?.ci;
 
-    // Generar claves RSA nativas de 2048 bits
+    if (!userEmail) {
+      const { data: authUser } = await supabase.auth.admin.getUserById(userId);
+      userEmail = authUser?.user?.email || 'usuario@upds.edu.bo';
+      userName = userName || authUser?.user?.user_metadata?.nombre || 'Estudiante UPDS';
+      userCi = userCi || authUser?.user?.user_metadata?.ci || '';
+    }
+
+    const nombre = userName || 'Estudiante UPDS';
+    const email = userEmail || 'estudiante@upds.edu.bo';
+
+    // 3. Generar claves RSA nativas de 2048 bits
     const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', {
       modulusLength: 2048,
       publicKeyEncoding: {
@@ -93,22 +107,24 @@ export class AppService {
       },
     });
 
-    // Generar el Certificado X.509 autofirmado en formato PEM para Adobe Reader DC
+    // 4. Generar Certificado X.509 autofirmado en formato PEM para Adobe Reader DC
     const certPem = this.generateX509CertificatePem(privateKey, { nombre, email });
 
-    // USAR UPSERT: si la fila no existe la inserta; si ya existe la actualiza
+    // 5. UPSERT garantizando el envío de EMAIL (resuelve la restricción NOT NULL de tu tabla)
     const { error } = await supabase
       .from('perfiles')
       .upsert({
         id: userId,
+        email: email, // <-- Campo NOT NULL en tu tabla public.perfiles
         nombre: nombre,
+        ci: userCi || '',
         llave_publica: publicKey,
         certificado_pem: certPem,
         updated_at: new Date(),
       });
 
     if (error) {
-      console.error('Error detallado de Supabase en generateKeyPair:', error);
+      console.error('Error al guardar perfiles en Supabase:', error);
       throw new BadRequestException('Error al guardar en Supabase: ' + error.message);
     }
 
@@ -342,7 +358,7 @@ export class AppService {
       throw new BadRequestException('Error en el motor de firma PAdES: ' + err.message);
     }
 
-    // PASO D: Registrar evidencia en Supabase
+    // PASO D: Registrar evidencia en la tabla documentos_firmados de Supabase
     await supabase.from('documentos_firmados').insert({
       usuario_id: perfil.id,
       nombre_archivo: fileName,
