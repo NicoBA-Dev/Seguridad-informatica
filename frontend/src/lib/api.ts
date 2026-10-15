@@ -1,9 +1,11 @@
-// Normalización inteligente:
-// 1. Si hay VITE_API_URL explícita, se usa asegurando un único '/api'.
-// 2. Si no hay variable definida, se usa la ruta relativa '/api' del mismo host (ideal para Render unificado).
-const envUrl = (import.meta.env.VITE_API_URL || '').trim().replace(/\/+$/, '');
-const API_URL = envUrl
-  ? (envUrl.endsWith('/api') ? envUrl : `${envUrl}/api`)
+// Detección de entorno:
+// - En producción (Render unificado) siempre se utiliza la ruta relativa '/api'.
+// - Solo en desarrollo local (import.meta.env.DEV) y si se define explícitamente VITE_API_URL, se utiliza esa URL.
+const isDev = import.meta.env.DEV;
+const rawEnvUrl = (import.meta.env.VITE_API_URL || '').trim().replace(/\/+$/, '');
+
+const API_URL = (isDev && rawEnvUrl)
+  ? (rawEnvUrl.endsWith('/api') ? rawEnvUrl : `${rawEnvUrl}/api`)
   : '/api';
 
 // 1. Registro de Usuario (con datos reales para Supabase)
