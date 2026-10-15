@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: free
     region: oregon
-    buildCommand: rm -f frontend/package-lock.json && npm --prefix frontend install && npm --prefix frontend run build && npm --prefix backend install && cd backend && npm run build
+    buildCommand: cd frontend && npm install && npm run build && cd ../backend && npm install && npm run build
     startCommand: cd backend && node dist/main.js
     healthCheckPath: /api/health
     envVars:
