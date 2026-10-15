@@ -4,25 +4,29 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 @Injectable()
 export class SupabaseService {
-  readonly client: SupabaseClient;
-  private readonly url: string;
-  private readonly key: string;
+  public client: SupabaseClient;
 
-  constructor(config: ConfigService) {
-    this.url = config.getOrThrow<string>('SUPABASE_URL');
-    this.key = config.getOrThrow<string>('SUPABASE_KEY');
-    this.client = createClient(this.url, this.key);
-  }
+  constructor(private readonly configService: ConfigService) {
+    const supabaseUrl =
+      this.configService.get<string>('SUPABASE_URL') ||
+      process.env.SUPABASE_URL ||
+      '';
+    const supabaseKey =
+      this.configService.get<string>('SUPABASE_SERVICE_ROLE_KEY') ||
+      this.configService.get<string>('SUPABASE_KEY') ||
+      process.env.SUPABASE_SERVICE_ROLE_KEY ||
+      process.env.SUPABASE_KEY ||
+      '';
 
-  // Comprueba que el proyecto de Supabase responde con las credenciales del .env
-  async ping(): Promise<boolean> {
-    try {
-      const res = await fetch(`${this.url}/auth/v1/health`, {
-        headers: { apikey: this.key },
-      });
-      return res.ok;
-    } catch {
-      return false;
-    }
+    // Desactivar cliente Realtime / WebSocket para backend
+    this.client = createClient(supabaseUrl, supabaseKey, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+      },
+      realtime: {
+        transport: null as any,
+      },
+    });
   }
 }
